@@ -74,9 +74,9 @@ class Player:
         self.dash_cooldown = 0.0
         self.dash_timer = 0.0
         self.is_dashing = False
-        self.dash_speed = 700.0
-        self.dash_time = 0.14
-        self.dash_cooldown_time = 0.6
+        self.dash_speed = 740.0
+        self.dash_time = 0.20
+        self.dash_cooldown_time = 0.65
         self.invulnerable_during_dash = True
 
         # Launcher
