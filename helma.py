@@ -338,6 +338,9 @@ class Player:
 # -------------------------
 class HelmaBoss:
     def __init__(self):
+        self.shield_disabled_timer = 0.0
+        self.heavy_shield_break_time = 2.5  # seconds
+
         self.launcher_uses = 0
         self.max_launcher_uses = 2
 
@@ -395,6 +398,13 @@ class HelmaBoss:
             return pygame.Rect(self.pos.x - 10*self.attack_facing - w, self.pos.y - int(130*BOSS_SCALE), w, h)
 
     def update(self, dt, player):
+        # Shield disabled by heavy
+        if self.shield_disabled_timer > 0:
+            self.shield_disabled_timer -= dt
+            self.shield_up = False
+        else:
+            # shield can behave normally again
+            pass
 
         # gravity
         if not self.on_ground:
@@ -427,8 +437,10 @@ class HelmaBoss:
             # shield stays up, but can be forced to break by parried heavy
             pass
         else:
-            # if shield down, count down
-            if self.shield_timer > 0:
+            # shield down state
+            if self.shield_disabled_timer > 0:
+                self.shield_up = False
+            elif self.shield_timer > 0:
                 self.shield_timer -= dt
             else:
                 self.shield_up = True
@@ -620,24 +632,41 @@ class HelmaBoss:
 
         # draw shield
         srect = self.shield_rect()
-        # shield base
-        pygame.draw.rect(screen, SILVER, srect)
-        # shield glow if up
-        if self.shield_up:
-            # pulse
-            a = int(80 + 80 * (0.5 + 0.5*math.sin(pygame.time.get_ticks() / 180)))
+
+        # CASE 1: Shield disabled by heavy (highest priority)
+        if self.shield_disabled_timer > 0:
+            # cracked / overheated shield
             surf = pygame.Surface((srect.width, srect.height), pygame.SRCALPHA)
-            surf.fill((200,200,220,a))
+            surf.fill((120, 80, 80, 160))
             screen.blit(surf, (srect.x, srect.y))
-            # if parry window active make it bright
+
+            # optional crack outline
+            pygame.draw.rect(screen, (200, 120, 120), srect, 2)
+
+        # CASE 2: Shield up and functional
+        elif self.shield_up:
+            # base shield
+            pygame.draw.rect(screen, SILVER, srect)
+
+            # pulse glow
+            a = int(80 + 80 * (0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 180)))
+            glow = pygame.Surface((srect.width, srect.height), pygame.SRCALPHA)
+            glow.fill((200, 200, 220, a))
+            screen.blit(glow, (srect.x, srect.y))
+
+            # parry window highlight
             if self.parry_window:
-                g = pygame.Surface((srect.width+6, srect.height+6), pygame.SRCALPHA)
-                pygame.draw.ellipse(g, (255, 220, 120, 180), (0,0,srect.width+6, srect.height+6), 6)
-                screen.blit(g, (srect.x-3, srect.y-3))
+                g = pygame.Surface((srect.width + 6, srect.height + 6), pygame.SRCALPHA)
+                pygame.draw.ellipse(
+                    g, (255, 220, 120, 180),
+                    (0, 0, srect.width + 6, srect.height + 6), 6
+                )
+                screen.blit(g, (srect.x - 3, srect.y - 3))
+
+        # CASE 3: Shield down normally (no disable, no parry)
         else:
-            # indicate shield down with darker tint
             surf = pygame.Surface((srect.width, srect.height), pygame.SRCALPHA)
-            surf.fill((80,80,90,100))
+            surf.fill((80, 80, 90, 120))
             screen.blit(surf, (srect.x, srect.y))
 
         # draw telegraphs / attacks
@@ -756,11 +785,13 @@ while running:
             boss.hp -= 2
             # player's heavy might consume its 'damage applied' flag
             player.attack_damage_applied = True
+            boss.shield_disabled_timer = boss.heavy_shield_break_time
         elif res == "hit":
             # heavy hit normal hurtbox
             if not player.attack_damage_applied:
                 boss.hp -= 2
                 player.attack_damage_applied = True
+                boss.shield_disabled_timer = boss.heavy_shield_break_time
 
 
     
