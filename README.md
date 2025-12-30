@@ -56,7 +56,7 @@ In the end, revenge costs more than it gives.
 
 ## 🎥 Gameplay Preview
 
-https://drive.google.com/file/d/1HASuVZ-mL2vsHd027esL-EG_skmPEPNN/preview
+https://drive.google.com/file/d/1HASuVZ-mL2vsHd027esL-EG_skmPEPNN/view
 
 > If the video does not load, [watch it here on Google Drive](https://drive.google.com/file/d/1HASuVZ-mL2vsHd027esL-EG_skmPEPNN/view).
 
