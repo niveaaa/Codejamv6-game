@@ -2,18 +2,24 @@ import pygame, sys, random
 from settings import *
 from player import Player
 from bosses import PapiaBoss, HarusBoss, rect_point_distance
+from story import CutsceneManager, DialogueSystem
 from pygame.math import Vector2
-# from cutscene import CutsceneManager
 
 pygame.init()
 pygame.mixer.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Fading Memory")
 clock = pygame.time.Clock()
-font_ui = pygame.font.SysFont("arial", 20)
-font_big = pygame.font.SysFont("arial", 48)
 
-# Load UI Assets
+# --- FONTS (Monospace for empty feeling) ---
+try:
+    font_ui = pygame.font.SysFont("courier new", 20, bold=True)
+    font_big = pygame.font.SysFont("courier new", 48, bold=True)
+except:
+    font_ui = pygame.font.SysFont("arial", 20)
+    font_big = pygame.font.SysFont("arial", 48)
+
+# --- LOAD ASSETS ---
 try:
     wife_portrait = pygame.image.load("assets/ui/wife_portrait.png").convert_alpha()
     wife_portrait = pygame.transform.scale(wife_portrait, (100, 100))
@@ -21,12 +27,16 @@ except:
     wife_portrait = pygame.Surface((100, 100))
     wife_portrait.fill((200, 150, 150))
 
-# Game Variables
+# --- GAME VARIABLES ---
 current_state = STATE_MENU
 player = Player()
 boss = None
 memory_opacity = 255 
 checkpoint_reached = False 
+
+# Story Systems
+cutscene_mgr = CutsceneManager(screen)
+dialogue_sys = DialogueSystem(screen)
 
 # Screen Shake
 shake_timer = 0.0
@@ -38,9 +48,11 @@ def start_shake(intensity, duration=0.2):
     shake_intensity = intensity
 
 def draw_ui(screen, player, boss_name, boss_hp, boss_max):
+    # Health Bar
     pygame.draw.rect(screen, RED, (20, 20, player.hp * 20, 20))
     pygame.draw.rect(screen, WHITE, (20, 20, player.max_hp * 20, 20), 2)
     
+    # Boss Health Bar
     if boss_hp > 0:
         bar_w = 300
         ratio = boss_hp / boss_max
@@ -49,9 +61,11 @@ def draw_ui(screen, player, boss_name, boss_hp, boss_max):
         txt = font_ui.render(boss_name, True, WHITE)
         screen.blit(txt, (WIDTH - 320, 45))
 
+    # Wife Portrait (Fades based on memory_opacity)
     wife_portrait.set_alpha(memory_opacity)
     screen.blit(wife_portrait, (20, 60))
     
+    # Dash UI
     if player.can_dash:
         col = BLUE if player.dash_cooldown <= 0 else GRAY
         pygame.draw.circle(screen, col, (40, 180), 10)
@@ -63,6 +77,58 @@ def draw_text_centered(text, y_offset=0, color=WHITE):
     rect = surf.get_rect(center=(WIDTH//2, HEIGHT//2 + y_offset))
     screen.blit(surf, rect)
 
+# --- STORY TRANSITION FUNCTIONS ---
+
+def start_intro_cutscene():
+    global current_state
+    current_state = STATE_CUTSCENE
+    # Simple storyboard sequence
+    cutscene_mgr.start_sequence([
+        {"text": "We were happy.", "duration": 2.5, "bg": (220, 220, 240), "color": BLACK},
+        {"text": "But then...", "duration": 1.5, "bg": (50, 50, 60), "color": WHITE},
+        {"text": "I SAW HIM KILL HER.", "duration": 2.0, "bg": RED, "color": BLACK},
+        {"text": "He ran into the caves.", "duration": 2.5, "bg": BLACK, "color": WHITE},
+    ])
+
+def finish_intro_cutscene():
+    global current_state
+    current_state = STATE_DIALOGUE
+    dialogue_sys.start_dialogue(
+        "To pursue the killer, you must be fast.\nThe memory of your FIRST DATE weighs you down.\n\nWill you sacrifice this memory to gain DASH?",
+        unlock_dash_and_start
+    )
+
+def unlock_dash_and_start():
+    global current_state, boss, memory_opacity
+    player.can_dash = True
+    memory_opacity = 180 # Fade portrait
+    current_state = STATE_GAME_PAPIA
+    boss = PapiaBoss()
+    player.pos = Vector2(100, GROUND_Y)
+
+def start_transition_dialogue():
+    global current_state
+    current_state = STATE_DIALOGUE
+    dialogue_sys.start_dialogue(
+        "One falls. But the killer (Harus) remains.\nYou are wounded and weak.\n\nSacrifice the memory of her VOICE to heal and continue?",
+        unlock_checkpoint_and_start
+    )
+
+def unlock_checkpoint_and_start():
+    global current_state, boss, memory_opacity, checkpoint_reached
+    memory_opacity = 80 # Fade portrait more
+    current_state = STATE_GAME_HARUS
+    boss = HarusBoss()
+    player.pos = Vector2(100, GROUND_Y)
+    player.hp = player.max_hp # Heal
+    checkpoint_reached = True
+
+def start_ending_sequence():
+    global current_state, memory_opacity
+    current_state = STATE_ENDING
+    memory_opacity = 0 # Gone
+
+# --- MAIN LOOP ---
 running = True
 while running:
     dt = clock.tick(FPS) / 1000.0
@@ -71,30 +137,19 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         
+        # Priority: Handle Dialogue Input first
+        if current_state == STATE_DIALOGUE:
+            dialogue_sys.handle_input(event)
+            continue 
+
         if event.type == pygame.KEYDOWN:
             if current_state == STATE_MENU:
                 if event.key == pygame.K_SPACE:
-                    current_state = STATE_INTRO
-                    
-            elif current_state == STATE_INTRO:
-                if event.key == pygame.K_SPACE:
-                    player.can_dash = True
-                    memory_opacity = 180
-                    current_state = STATE_GAME_PAPIA
-                    boss = PapiaBoss()
-                    player.pos = Vector2(100, GROUND_Y)
-                
-            elif current_state == STATE_TRANSITION:
-                if event.key == pygame.K_SPACE:
-                    memory_opacity = 80
-                    current_state = STATE_GAME_HARUS
-                    boss = HarusBoss()
-                    player.pos = Vector2(100, GROUND_Y)
-                    player.hp = player.max_hp
-                    checkpoint_reached = True 
+                    start_intro_cutscene()
                     
             elif current_state == STATE_ENDING:
                 if event.key == pygame.K_SPACE:
+                    # Restart Game
                     current_state = STATE_MENU
                     player = Player()
                     memory_opacity = 255
@@ -103,25 +158,32 @@ while running:
             elif current_state == STATE_GAMEOVER:
                 if event.key == pygame.K_SPACE:
                     if checkpoint_reached:
-                        current_state = STATE_TRANSITION
+                        # Retry Harus
+                        start_transition_dialogue()
                         player = Player()
                         player.can_dash = True
-                        memory_opacity = 80
                     else:
+                        # Full Restart
                         current_state = STATE_MENU
                         player = Player()
                         memory_opacity = 255
                         checkpoint_reached = False
 
-    # Logic
-    keys = pygame.key.get_pressed()
+    # --- LOGIC UPDATES ---
+    
+    if current_state == STATE_CUTSCENE:
+        cutscene_mgr.update(dt)
+        if cutscene_mgr.finished:
+            finish_intro_cutscene()
 
-    if current_state in [STATE_GAME_PAPIA, STATE_GAME_HARUS]:
+    elif current_state in [STATE_GAME_PAPIA, STATE_GAME_HARUS]:
+        keys = pygame.key.get_pressed()
         player.update(dt, keys)
+        
         if boss:
             boss.update(dt, player)
             
-            # Check Shake
+            # Check Boss Screen Shake Request
             if hasattr(boss, 'shake_requested') and boss.shake_requested > 0:
                 start_shake(boss.shake_requested)
             
@@ -131,8 +193,10 @@ while running:
                     if not player.attack_damage_applied:
                         boss.hp -= 1
                         player.attack_damage_applied = True
-                
-                # Player destroys Orb
+                        if hasattr(boss, 'on_parried') and boss.parry_window:
+                             boss.on_parried()
+
+                # Player hits Orb (Papia)
                 if isinstance(boss, PapiaBoss) and boss.orb:
                     orb_rect = pygame.Rect(boss.orb.pos.x - 20, boss.orb.pos.y - 20, 40, 40)
                     if player.attack_hitbox.colliderect(orb_rect):
@@ -143,7 +207,7 @@ while running:
             # Boss hits Player
             boss_hit = False
             
-            # 1. Generic Hitbox (ONLY IF ACTIVE) - Fixes damage during telegraph
+            # 1. Generic Hitbox
             if hasattr(boss, 'attack_hitbox') and boss.attack_hitbox:
                 if boss.attack_active and boss.attack_hitbox.colliderect(player.hurtbox()):
                     boss_hit = True
@@ -151,47 +215,46 @@ while running:
             # 2. Papia Projectiles
             if isinstance(boss, PapiaBoss):
                 for m in boss.meteors:
-                    # Check both impact AND air collision
-                    if m.hits_player(player):
-                        boss_hit = True
+                    if m.hits_player(player): boss_hit = True
                 if boss.orb and (boss.orb.pos - player.pos).length() < 40:
                     boss_hit = True
                     boss.orb = None 
 
             # 3. Harus Shockwaves & Swing
             if isinstance(boss, HarusBoss):
-                # Shockwaves
                 for s in boss.shockwaves:
                     if s.rect.colliderect(player.hurtbox()):
                         boss_hit = True
                         s.active = False 
                 
-                # Swing Tip (Axe Collision)
                 if boss.attack_type == "swing" and boss.attack_active:
                     tip = boss.axe_tip_pos()
-                    # Check distance from tip to player hurtbox
-                    d = rect_point_distance(player.hurtbox(), tip)
-                    if d <= boss.swing_tip_radius:
+                    if rect_point_distance(player.hurtbox(), tip) <= boss.swing_tip_radius:
                         boss_hit = True
 
+            # Damage application
             if boss_hit and player.hit_recovery_timer <= 0:
                 player.hp -= 1
                 player.hit_recovery_timer = 1.0
                 player.vel.x = -300 * player.facing
+                start_shake(5, 0.2)
 
+            # --- DEATH CHECKS ---
             if player.hp <= 0:
                 if hasattr(boss, 'cleanup'): boss.cleanup()
                 boss = None
                 current_state = STATE_GAMEOVER
+                
             elif boss.hp <= 0:
                 if hasattr(boss, 'cleanup'): boss.cleanup()
+                boss = None
                 if current_state == STATE_GAME_PAPIA:
-                    boss = None
-                    current_state = STATE_TRANSITION
+                    start_transition_dialogue()
                 else:
-                    boss = None
-                    current_state = STATE_ENDING
+                    start_ending_sequence()
 
+    # --- DRAWING ---
+    
     # Shake Calculation
     offset = (0, 0)
     if shake_timer > 0:
@@ -199,55 +262,53 @@ while running:
         offset = (random.randint(-int(shake_intensity), int(shake_intensity)), 
                   random.randint(-int(shake_intensity), int(shake_intensity)))
 
-    # Draw
+    # Draw Background (Default Black)
     screen.fill(BLACK)
     
-    bg_rect_sky = pygame.Rect(0 + offset[0], 0 + offset[1], WIDTH, GROUND_Y)
-    bg_rect_gnd = pygame.Rect(0 + offset[0], GROUND_Y + offset[1], WIDTH, HEIGHT-GROUND_Y)
-
     if current_state == STATE_MENU:
-        draw_text_centered("FADING MEMORY")
-        draw_text_centered("Press SPACE to Start", 50, GRAY)
+        draw_text_centered("FADING MEMORY", -20)
         
-    elif current_state == STATE_INTRO:
-        draw_text_centered("I saw him kill her...", -40)
-        draw_text_centered("To hunt him, I must move faster.", 0)
-        draw_text_centered("I will sacrifice the memory of our First Date.", 40)
-        draw_text_centered("[Press SPACE to Forget & Gain DASH]", 100, BLUE)
-        
-    elif current_state == STATE_GAME_PAPIA:
-        pygame.draw.rect(screen, (30, 30, 40), bg_rect_sky) 
-        pygame.draw.rect(screen, (20, 20, 20), bg_rect_gnd)
-        player.draw(screen, offset)
-        if boss: boss.draw(screen, offset)
-        if boss: draw_ui(screen, player, "PAPIA", boss.hp, boss.max_hp)
-        
-    elif current_state == STATE_TRANSITION:
-        draw_text_centered("Papia is dead. But he is still out there.", -40)
-        draw_text_centered("To face the killer, I need strength.", 0)
-        draw_text_centered("I will sacrifice the memory of her Voice.", 40)
-        draw_text_centered("[Press SPACE to Forget & Continue]", 100, BLUE)
+        # Blink effect for "Press Start"
+        if (pygame.time.get_ticks() // 500) % 2 == 0:
+            surf = font_ui.render("Press SPACE to Start", True, GRAY)
+            screen.blit(surf, surf.get_rect(center=(WIDTH//2, HEIGHT//2 + 50)))
 
-    elif current_state == STATE_GAME_HARUS:
-        pygame.draw.rect(screen, (40, 0, 0), bg_rect_sky) 
-        pygame.draw.rect(screen, (20, 20, 20), bg_rect_gnd)
+    elif current_state == STATE_CUTSCENE:
+        cutscene_mgr.draw()
+        
+    elif current_state == STATE_DIALOGUE:
+        # Draw game background faintly behind dialogue
+        pygame.draw.rect(screen, (10, 10, 15), (0, 0, WIDTH, HEIGHT))
+        dialogue_sys.draw()
+
+    elif current_state in [STATE_GAME_PAPIA, STATE_GAME_HARUS]:
+        # Sky/Ground
+        sky_col = (30, 30, 40) if current_state == STATE_GAME_PAPIA else (40, 10, 10)
+        pygame.draw.rect(screen, sky_col, (0 + offset[0], 0 + offset[1], WIDTH, GROUND_Y))
+        pygame.draw.rect(screen, (20, 20, 20), (0 + offset[0], GROUND_Y + offset[1], WIDTH, HEIGHT-GROUND_Y))
+        
         player.draw(screen, offset)
         if boss: boss.draw(screen, offset)
-        if boss: draw_ui(screen, player, "HARUS (KILLER)", boss.hp, boss.max_hp)
+        
+        # UI
+        boss_name = "PAPIA" if current_state == STATE_GAME_PAPIA else "HARUS (KILLER)"
+        if boss: draw_ui(screen, player, boss_name, boss.hp, boss.max_hp)
 
     elif current_state == STATE_ENDING:
-        memory_opacity = 0
-        draw_text_centered("It is done.", -40)
+        draw_text_centered("IT IS DONE.", -40)
         draw_text_centered("I have my revenge...", 0)
-        draw_text_centered("But I cannot remember her name.", 40, RED)
-        draw_ui(screen, player, "", 0, 1)
+        
+        # Dramatic red text
+        surf = font_ui.render("But I cannot remember her name.", True, RED)
+        screen.blit(surf, surf.get_rect(center=(WIDTH//2, HEIGHT//2 + 60)))
+        
+        draw_ui(screen, player, "", 0, 1) # Shows empty portrait
 
     elif current_state == STATE_GAMEOVER:
-        draw_text_centered("YOU DIED", 0, RED)
-        if checkpoint_reached:
-             draw_text_centered("Press SPACE to Retry (Checkpoint: Harus)", 50)
-        else:
-             draw_text_centered("Press SPACE to Restart", 50)
+        draw_text_centered("YOU DIED", -20, RED)
+        msg = "Press SPACE to Retry" if checkpoint_reached else "Press SPACE to Restart"
+        surf = font_ui.render(msg, True, WHITE)
+        screen.blit(surf, surf.get_rect(center=(WIDTH//2, HEIGHT//2 + 40)))
 
     pygame.display.flip()
 
