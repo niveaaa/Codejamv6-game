@@ -1,6 +1,15 @@
 import pygame, math, random
 from pygame.math import Vector2
 
+def load_strip(path, frame_count, frame_w=64, frame_h=64):
+    sheet = pygame.image.load(path).convert_alpha()
+    frames = []
+    for i in range(frame_count):
+        frame = sheet.subsurface((i*frame_w, 0, frame_w, frame_h))
+        frames.append(frame)
+    return frames
+
+
 pygame.init()
 WIDTH, HEIGHT = 960, 540
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -9,6 +18,8 @@ FONT = pygame.font.SysFont("arial", 18)
 
 GROUND_Y = 440
 FPS = 60
+BOSS_SCALE = 2.0
+
 
 # Colors
 WHITE = (240,240,240)
@@ -66,6 +77,29 @@ class Player:
         # when player gets hit, invulnerability timer
         self.hit_recovery_timer = 0
 
+        # ---------------- Animation ----------------
+        self.animations = {
+            "idle": load_strip("assets/protag/idle.png", 4),
+            "walk": load_strip("assets/protag/walk.png", 2),
+            "windup": load_strip("assets/protag/windup.png", 2),
+            "attack": load_strip("assets/protag/attack.png", 1),
+            "recovery": load_strip("assets/protag/recovery.png", 1),
+        }
+
+        self.anim_state = "idle"
+        self.anim_frame = 0
+        self.anim_timer = 0
+
+        # animation speeds (seconds per frame)
+        self.anim_speed = {
+            "idle": 0.25,
+            "walk": 0.15,
+            "windup": 0.10,
+            "attack": 0.20,
+            "recovery": 0.20,
+        }
+
+
     def hurtbox(self):
         return pygame.Rect(self.pos.x-20, self.pos.y-80, 40, 80)
 
@@ -86,6 +120,35 @@ class Player:
         self.attack_hitbox = None
         self.attack_damage_applied = False
         self.cooldown = 0
+
+    def update_animation(self, dt):
+        # decide animation state
+        if self.attack_state == "windup":
+            state = "windup"
+        elif self.attack_state == "active":
+            state = "attack"
+        elif self.attack_state == "recovery":
+            state = "recovery"
+        else:
+            if not self.on_ground:
+                state = "idle"
+            elif abs(self.vel.x) > 10:
+                state = "walk"
+            else:
+                state = "idle"
+
+        # reset frame if animation changed
+        if state != self.anim_state:
+            self.anim_state = state
+            self.anim_frame = 0
+            self.anim_timer = 0
+
+        # advance frames
+        self.anim_timer += dt
+        if self.anim_timer >= self.anim_speed[self.anim_state]:
+            self.anim_timer = 0
+            self.anim_frame = (self.anim_frame + 1) % len(self.animations[self.anim_state])
+
 
     def update(self, dt, keys):
         # timers
@@ -175,18 +238,42 @@ class Player:
             self.vel.y = 0
             self.on_ground = True
 
+        self.update_animation(dt)
+
+
     def draw(self):
-        # flash when in hit recovery
+        frame = self.animations[self.anim_state][self.anim_frame]
+
+        SCALE = 2.0  # <<< CHANGE THIS IF NEEDED
+
+        # flip sprite if facing left
+        if self.facing == -1:
+            frame = pygame.transform.flip(frame, True, False)
+
+        # scale sprite
+        frame = pygame.transform.scale(
+            frame,
+            (int(frame.get_width() * SCALE), int(frame.get_height() * SCALE))
+        )
+
+        # anchor sprite at feet
+        draw_x = self.pos.x - frame.get_width() // 2
+        draw_y = self.pos.y - frame.get_height()
+
+        # hit recovery flash (debug-friendly)
         if self.hit_recovery_timer > 0:
-            if int(self.hit_recovery_timer*10) % 2 == 0:
-                color = GREEN
-            else:
-                color = BLUE
-        else:
-            color = BLUE
-        pygame.draw.rect(screen, color, self.hurtbox())
+            if int(self.hit_recovery_timer * 10) % 2 == 0:
+                frame = frame.copy()
+                frame.fill((120, 255, 180), special_flags=pygame.BLEND_ADD)
+
+        screen.blit(frame, (draw_x, draw_y))
+
+        # debug hitbox (optional)
+        # pygame.draw.rect(screen, (0,255,0), self.hurtbox(), 1)
         if self.attack_hitbox:
-            pygame.draw.rect(screen, YELLOW, self.attack_hitbox, 2)
+            pygame.draw.rect(screen, (255,255,0), self.attack_hitbox, 2)
+
+
 
 # -------------------------------------
 # Shockwave
@@ -240,8 +327,35 @@ class AxeBoss:
         # track whether shockwave spawned on ground contact
         self._shockwave_spawned = False
 
+        self.prev_tip_y = None
+
+
         # AI
         self.next_action_cooldown = 0
+
+        # ---------------- Animation ----------------
+        self.animations = {
+            "idle": load_strip("assets/harus/idle.png", 4, 256, 256),
+            "walk": load_strip("assets/harus/walk.png", 4, 256, 256),
+            "windup": load_strip("assets/harus/windup.png", 4, 256, 256),
+            "attack": load_strip("assets/harus/attack.png", 3, 256, 256),
+            "recover": load_strip("assets/harus/recover.png", 4, 256, 256),
+            "spin": load_strip("assets/harus/spin.png", 4, 256, 256),
+        }
+
+        self.anim_state = "idle"
+        self.anim_frame = 0
+        self.anim_timer = 0.0
+
+        self.anim_speed = {
+            "idle": 0.25,
+            "walk": 0.15,
+            "windup": 0.12,
+            "attack": 0.10,
+            "recover": 0.18,
+            "spin": 0.10,
+        }
+
 
     def hurtbox(self):
         return pygame.Rect(self.pos.x-self.half_width, self.pos.y-180, self.half_width*2, 180)
@@ -254,6 +368,38 @@ class AxeBoss:
         rad = math.radians(self.rotation)
         tip = Vector2(math.cos(rad)*self.swing_reach, math.sin(rad)*self.swing_reach)
         return center + tip
+    
+    def update_animation(self, dt, player):
+        # Decide animation state from AI state
+        if self.state == "telegraph":
+            state = "spin" if self.attack_type == "spin" else "windup"
+        elif self.state == "active":
+            state = "spin" if self.attack_type == "spin" else "attack"
+        elif self.state in ("recovery", "stunned"):
+            state = "recover"
+        else:
+            if abs(player.pos.x - self.pos.x) > 300:
+                state = "walk"
+            else:
+                state = "idle"
+
+        # Reset animation on change
+        if state != self.anim_state:
+            self.anim_state = state
+            self.anim_frame = 0
+            self.anim_timer = 0.0
+
+        # Advance frames
+        self.anim_timer += dt
+        if self.anim_timer >= self.anim_speed[self.anim_state]:
+            self.anim_timer = 0
+            self.anim_frame += 1
+            if self.anim_frame >= len(self.animations[self.anim_state]):
+                # attack animations should hold on last frame
+                if self.anim_state in ("attack", "windup"):
+                    self.anim_frame = len(self.animations[self.anim_state]) - 1
+                else:
+                    self.anim_frame = 0
 
     def update(self, dt, player):
         dist = abs(player.pos.x - self.pos.x)
@@ -302,20 +448,10 @@ class AxeBoss:
             # animate rotation during telegraph using ease-in so it accelerates toward impact
             self.timer -= dt
             if self.attack_type == "swing":
-                total = self.swing_telegraph_time
-                elapsed = total - self.timer
-                t = max(0.0, min(1.0, elapsed / total))
-                # ease-in so it becomes faster toward the end
-                t_eased = ease_in(t)
-                pre_target = self.swing_target_angle - (12 * self.attack_facing)  # stop slightly before
-                self.rotation = (1-t_eased)*self.swing_start_angle + t_eased*pre_target
-                # small parry window right before impact
-                if self.timer <= 0.12:
-                    self.parry_window = True
-                else:
-                    self.parry_window = False
-                # enable damage in the late telegraph so trajectory hurts earlier
-                self.attack_active = (t > 0.45)
+                # Axe stays fully behind boss during windup
+                self.rotation = self.swing_start_angle
+                self.parry_window = False
+                self.attack_active = False
             else:
                 # spin telegraph rotation
                 self.rotation += 120 * dt
@@ -336,22 +472,35 @@ class AxeBoss:
                 self.start_active()
 
         elif self.state == "active":
+
+            tip = self.axe_tip_pos()
+
+            if self.prev_tip_y is not None:
+                crossed_ground = (
+                    self.prev_tip_y < GROUND_Y - 6 and
+                    tip.y >= GROUND_Y - 6
+                )
+                if crossed_ground and not self._shockwave_spawned:
+                        self.spawn_shockwave()
+                        self._shockwave_spawned = True
+
+            self.prev_tip_y = tip.y
             # in active we complete the arc and apply damage if tip touches the player
             # we will finish the rotation with an ease-out so motion slows after impact
             self.timer -= dt
             if self.attack_type == "swing":
-                # complete rotation to final target smoothly
                 total = self.swing_active_time
                 elapsed = total - self.timer
                 t = max(0.0, min(1.0, elapsed / total))
                 t_eased = ease_out(t)
-                self.rotation = (1-t_eased)*self.rotation + t_eased*self.swing_target_angle
+
+                self.rotation = (
+                    (1 - t_eased) * self.swing_start_angle +
+                    t_eased * self.swing_target_angle
+                )
+
                 self.attack_active = True
-                # ground contact: spawn shockwave when tip touches or goes below ground
-                tip = self.axe_tip_pos()
-                if (not self._shockwave_spawned) and tip.y >= GROUND_Y - 6:
-                    self.spawn_shockwave()
-                    self._shockwave_spawned = True
+
             if self.timer <= 0:
                 self.end_attack()
 
@@ -371,8 +520,12 @@ class AxeBoss:
             s.update(dt)
         self.shockwaves = [s for s in self.shockwaves if s.active]
 
+        self.update_animation(dt, player)
+
+
     # -----------------------------
     def start_swing(self):
+        
         # lock facing at the start of the move
         self.attack_facing = self.facing
         self.state = "telegraph"
@@ -384,12 +537,17 @@ class AxeBoss:
         self.swing_reach = 160
         self.swing_tip_radius = 28
         # set start and target angles explicitly per facing so direction is correct
+        # Axe starts clearly behind the boss, ends down-forward
         if self.attack_facing == 1:
-            self.swing_start_angle = -140
+            self.swing_start_angle = -200
             self.swing_target_angle = 60
         else:
-            self.swing_start_angle = -40
-            self.swing_target_angle = -230
+            self.swing_start_angle = 20
+            self.swing_target_angle = -240
+
+        self.rotation = self.swing_start_angle
+
+        self.prev_tip_y = None
         self.was_parried = False
         self.parry_window = False
         self.attack_active = False
@@ -402,22 +560,28 @@ class AxeBoss:
         self.attack_type = "spin"
         # use similar windup feel but longer active
         self.swing_telegraph_time = 0.8
-        self.sw_spin_active_time = 1.0
+        self.sw_spin_active_time = 0.75
         self.timer = self.swing_telegraph_time
         self.rotation = 0
         self.was_parried = False
         self.parry_window = False
         # spin attack is larger area around boss; increase reach
-        reach = 500
-        x = self.pos.x - reach//2
-        self.attack_hitbox = pygame.Rect(x, self.pos.y - 100, reach, 80)
+        reach = 400   # reduced from 500
+        height = 70
+        x = self.pos.x - reach // 2
+        self.attack_hitbox = pygame.Rect(x, self.pos.y - 90, reach, height)
+
 
     def start_active(self):
         self.state = "active"
         self.timer = self.swing_active_time if self.attack_type == "swing" else self.sw_spin_active_time
         self.attack_active = True
-        # during active the parry window closes
         self.parry_window = False
+
+        # IMPORTANT: reset rotation to exact windup end
+        if self.attack_type == "swing":
+            self.rotation = self.swing_start_angle
+
 
     def end_attack(self):
         self.state = "recovery"
@@ -443,7 +607,22 @@ class AxeBoss:
         )
 
     def draw(self):
-        pygame.draw.rect(screen, RED, self.hurtbox())
+        frame = self.animations[self.anim_state][self.anim_frame]
+
+        if self.facing == -1:
+            frame = pygame.transform.flip(frame, True, False)
+
+        frame = pygame.transform.scale(
+            frame,
+            (int(frame.get_width() * BOSS_SCALE),
+             int(frame.get_height() * BOSS_SCALE))
+        )
+
+        draw_x = self.pos.x - frame.get_width() // 2
+        draw_y = self.pos.y - frame.get_height()
+
+        screen.blit(frame, (draw_x, draw_y))
+
 
         # render telegraph/parry/active visuals
         if self.state in ("telegraph", "parry", "active"):
