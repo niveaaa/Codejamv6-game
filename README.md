@@ -54,6 +54,19 @@ In the end, revenge costs more than it gives.
 
 ---
 
+## 🎥 Gameplay Preview
+
+<iframe 
+  src="https://drive.google.com/file/d/1HASuVZ-mL2vsHd027esL-EG_skmPEPNN/preview"
+  width="720"
+  height="405"
+  allow="autoplay">
+</iframe>
+
+> If the video does not load, [watch it here on Google Drive](https://drive.google.com/file/d/1HASuVZ-mL2vsHd027esL-EG_skmPEPNN/view).
+
+---
+
 ## 🧠 Core Mechanics
 
 ### Memory Sacrifice System
